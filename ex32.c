@@ -1,0 +1,266 @@
+// Eden Yefet
+// 204778294
+
+#include <zconf.h>
+#include <fcntl.h>
+#include <stdlib.h>
+#include <dirent.h>
+#include <memory.h>
+#include <stdio.h>
+#include <sys/wait.h>
+
+#define TRUE 1
+#define FALSE 0
+#define ERROR_MSG "Error in system call"
+
+#define COMPILED_FILE_NAME "current.out"
+#define OUTPUT_FILE_NAME "out.txt"
+#define COMPARATOR "comp.out"
+#define RESULTS_FILE_NAME "results.csv"
+#define TIMEOUT_SEC 5
+
+#define NO_C_FILE "NO_C_FILE"
+#define COMPILATION_ERROR "COMPILATION_ERROR"
+#define TIMEOUT "TIMEOUT"
+#define BAD_OUTPUT "BAD_OUTPUT"
+#define SIMILIAR_OUTPUT "SIMILIAR_OUTPUT"
+#define GREAT_JOB "GREAT_JOB"
+
+typedef enum OutputResult {
+  DIFFERENT = 1,
+  SIMILIAR,
+  IDENTICAL
+} OutputResult;
+
+typedef struct {
+  char input_directory[PATH_MAX];
+  char input_file[PATH_MAX];
+  char correct_output_file[PATH_MAX];
+} ConfigFile;
+
+int copy_line(const char *src, char *dst) {
+  int i = 0;
+  while (src[i] != '\n') {
+    dst[i] = src[i];
+    i++;
+  }
+  dst[i] = '\0';
+  return i + 1;
+}
+
+int is_c_file(char *file_name) {
+  char *dot;
+  if ((dot = strrchr(file_name, '.')) != NULL && strcmp(dot, ".c") == 0) {
+    return TRUE;
+  }
+  return FALSE;
+}
+
+int read_config_file(char *config_file_path, ConfigFile *config_file) {
+  ssize_t ret1;
+  char buffer[3 * PATH_MAX];
+  int i;
+
+  // Reads file to buffer
+  int fd = open(config_file_path, O_RDONLY);
+  if (fd == -1) {
+    write(STDERR_FILENO, ERROR_MSG, sizeof(ERROR_MSG) - 1);
+    return -1;
+  }
+  ret1 = read(fd, buffer, sizeof(buffer));
+  if (ret1 == -1) {
+    write(STDERR_FILENO, ERROR_MSG, sizeof(ERROR_MSG) - 1);
+    return -1;
+  }
+  close(fd);
+
+  // Parses buffer
+  i = copy_line(buffer, config_file->input_directory);
+  i += copy_line(&(buffer[i]), config_file->input_file);
+  copy_line(&(buffer[i]), config_file->correct_output_file);
+}
+
+/**
+ * Recursively searches for a C file
+ * @param dp
+ * @param path
+ * @param c_file_path The char* to update to the c_file
+ * @return 1 if found, 0 otherwise.
+ */
+int find_c_file(DIR *dp, char *path, char *c_file_path) {
+  struct dirent *dirent = NULL;
+  DIR *sub_dir = NULL;
+  char path_buffer[PATH_MAX];
+
+  while ((dirent = readdir(dp)) != NULL) {
+    if (dirent->d_type == DT_REG && is_c_file(dirent->d_name)) {
+      strcpy(path_buffer, path);
+      strcat(path_buffer, "/");
+      strcat(path_buffer, dirent->d_name);
+      strcpy(c_file_path, path_buffer);
+      return 1;
+    }
+    if (dirent->d_type == DT_DIR && strcmp(dirent->d_name, ".") != 0 &&
+        strcmp(dirent->d_name, "..") != 0) {
+
+      strcpy(path_buffer, path);
+      strcat(path_buffer, "/");
+      strcat(path_buffer, dirent->d_name);
+
+      sub_dir = opendir(path_buffer);
+      find_c_file(sub_dir, path_buffer, c_file_path);
+    }
+  }
+  strcpy(c_file_path, "");
+  return 0;
+}
+
+int compile_c_file(char *path, char *output_file_name) {
+
+  int pid = fork();
+  if (pid == 0) {
+    char *argv[] = {"gcc", "-o", COMPILED_FILE_NAME, path, NULL};
+    execvp("gcc", argv);
+    exit(-1);
+  } else {
+    int status;
+    int r;
+    if(waitpid(pid, &status, 0) != -1){
+      if(WIFEXITED(status)){
+        r = WEXITSTATUS(status);
+      }
+    }
+    return r == 0;
+  }
+}
+
+int run_file(char *file_path, char *input_file_path) {
+  char buffer[PATH_MAX] = "";
+  strcat(buffer, "./");
+  strcat(buffer, file_path);
+  int in = open(input_file_path, O_RDONLY);
+  if (in == -1) {
+    write(STDERR_FILENO, ERROR_MSG, sizeof(ERROR_MSG) - 1);
+    return -1;
+  }
+  int out =
+      open(OUTPUT_FILE_NAME, O_WRONLY | O_TRUNC | O_CREAT, S_IRUSR | S_IRGRP |
+          S_IWGRP | S_IWUSR);
+  if (out == -1) {
+    write(STDERR_FILENO, ERROR_MSG, sizeof(ERROR_MSG) - 1);
+    return -1;
+  }
+  dup2(in, 0);
+  dup2(out, 1);
+  close(out);
+  close(in);
+
+  int pid = fork();
+  if (pid == 0) {
+    execl(buffer, buffer, NULL);
+  } else {
+    int status = 0;
+    int i;
+    for(i=0; i<TIMEOUT_SEC;i++){
+      sleep(1);
+      if(waitpid(pid, &status, WNOHANG)!=0){
+        break;
+      }
+    }
+    return i<TIMEOUT_SEC;
+  }
+}
+
+int compare_output(char *current_output, char *correct_output) {
+
+  int pid = fork();
+  if (pid == 0) {
+    execl(COMPARATOR, COMPARATOR, current_output, correct_output, NULL);
+  } else {
+    int status = 0;
+    waitpid(pid,&status,0);
+
+    return WEXITSTATUS(status);
+  }
+}
+
+void add_results_entry(int fd, char *username, int grade, char *reason) {
+  char buffer[PATH_MAX];
+  char grade_str[5];
+  sprintf(grade_str, "%d", grade);
+  strcpy(buffer, username);
+  strcat(buffer, ",");
+  strcat(buffer, grade_str);
+  strcat(buffer, ",");
+  strcat(buffer, reason);
+  strcat(buffer, "\n");
+
+  write(fd, buffer, strlen(buffer));
+}
+
+int main(int argc, char **argv) {
+  ConfigFile config_file;
+  DIR *p_dir;
+  DIR *p_current_dir;
+  char c_file_path[PATH_MAX];
+
+  // Checks number of arguments
+  if (argc != 2) {
+    return -1;
+  }
+
+  // Reads config file
+  read_config_file(argv[1], &config_file);
+  if ((p_dir = opendir(config_file.input_directory)) == NULL) {
+    return -1;
+  }
+
+  // Iterates sub_directories
+  struct dirent *dirent = NULL;
+  int results = open(RESULTS_FILE_NAME, O_WRONLY | O_TRUNC | O_APPEND | O_CREAT,
+                     S_IRUSR | S_IRGRP | S_IWGRP | S_IWUSR);
+
+  char current_dir[PATH_MAX];
+  while ((dirent = readdir(p_dir)) != NULL) {
+    if (dirent->d_type == DT_DIR && strcmp(dirent->d_name, ".") != 0 &&
+        strcmp(dirent->d_name, "..") != 0) {
+      strcpy(current_dir, config_file.input_directory);
+      strcat(current_dir, "/");
+      strcat(current_dir, dirent->d_name);
+
+      if ((p_current_dir = opendir(current_dir)) == NULL) {
+        return -1;
+      }
+
+      if (!find_c_file(p_current_dir, current_dir, c_file_path)) {
+        add_results_entry(results, dirent->d_name, 0, NO_C_FILE);
+      } else if (!compile_c_file(c_file_path, COMPILED_FILE_NAME)) {
+        add_results_entry(results, dirent->d_name, 0, COMPILATION_ERROR);
+      } else if (!run_file(COMPILED_FILE_NAME, config_file.input_file)) {
+        add_results_entry(results, dirent->d_name, 0, TIMEOUT);
+      } else {
+        int output = compare_output(OUTPUT_FILE_NAME, config_file
+            .correct_output_file);
+
+        switch (output) {
+          case IDENTICAL:
+            add_results_entry(results, dirent->d_name, 100, GREAT_JOB);
+            break;
+          case SIMILIAR:
+            add_results_entry(results, dirent->d_name, 80, SIMILIAR_OUTPUT);
+            break;
+          case DIFFERENT:
+            add_results_entry(results, dirent->d_name, 60, BAD_OUTPUT);
+            break;
+          default:
+            printf("Error");
+        }
+      }
+      closedir(p_current_dir);
+    }
+  }
+
+  close(results);
+  printf("Finished");
+  return 0;
+}
