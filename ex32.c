@@ -286,7 +286,7 @@ int main(int argc, char **argv) {
         add_results_entry(results, dirent->d_name, 0, TIMEOUT);
       } else {
         int output = compare_output(OUTPUT_FILE_NAME, config_file
-            .correct_output_file);
+            .correct_output_file, COMPARATOR);
 
         switch (output) {
           case IDENTICAL:
