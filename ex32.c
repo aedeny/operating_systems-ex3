@@ -9,24 +9,26 @@
 #include <stdio.h>
 #include <sys/wait.h>
 
+// General
 #define TRUE 1
 #define FALSE 0
-#define ERROR_MSG "Error in system call"
+#define NEW_LINE_DELIMITER '\n'
+#define TIMEOUT_SEC 5
 
+// File names
 #define COMPILED_FILE_NAME "current.out"
 #define OUTPUT_FILE_NAME "out.txt"
 #define COMPARATOR "comp.out"
 #define RESULTS_FILE_NAME "results.csv"
 
-#define TIMEOUT_SEC 5
-#define NEW_LINE_DELIM '\n'
-
-#define NO_C_FILE "NO_C_FILE"
-#define COMPILATION_ERROR "COMPILATION_ERROR"
-#define TIMEOUT "TIMEOUT"
+// Strings
 #define BAD_OUTPUT "BAD_OUTPUT"
-#define SIMILAR_OUTPUT "SIMILAR_OUTPUT"
+#define COMPILATION_ERROR "COMPILATION_ERROR"
+#define ERROR_MSG "Error in system call"
 #define GREAT_JOB "GREAT_JOB"
+#define NO_C_FILE "NO_C_FILE"
+#define SIMILAR_OUTPUT "SIMILAR_OUTPUT"
+#define TIMEOUT "TIMEOUT"
 
 typedef enum OutputResult {
   DIFFERENT = 1,
@@ -64,10 +66,7 @@ int copy_line(const char *src, char *dst, char delimiter) {
  */
 int is_c_file(char *file_path) {
   char *dot;
-  if ((dot = strrchr(file_path, '.')) != NULL && strcmp(dot, ".c") == 0) {
-    return TRUE;
-  }
-  return FALSE;
+  return (dot = strrchr(file_path, '.')) != NULL && strcmp(dot, ".c") == 0;
 }
 
 /**
@@ -96,9 +95,9 @@ int read_config_file(char *config_file_path, ConfigFile *config_file) {
   close(fd);
 
   // Parses buffer
-  i = copy_line(buffer, config_file->input_directory, NEW_LINE_DELIM);
-  i += copy_line(&(buffer[i]), config_file->input_file, NEW_LINE_DELIM);
-  copy_line(&(buffer[i]), config_file->correct_output_file, NEW_LINE_DELIM);
+  i = copy_line(buffer, config_file->input_directory, NEW_LINE_DELIMITER);
+  i += copy_line(&(buffer[i]), config_file->input_file, NEW_LINE_DELIMITER);
+  copy_line(&(buffer[i]), config_file->correct_output_file, NEW_LINE_DELIMITER);
   return TRUE;
 }
 
@@ -116,7 +115,7 @@ int find_c_file(DIR *dp, char *path, char *c_file_path) {
   char path_buffer[PATH_MAX];
 
   while ((dirent = readdir(dp)) != NULL) {
-    // If file
+    // File
     if (dirent->d_type == DT_REG && is_c_file(dirent->d_name)) {
       strcpy(path_buffer, path);
       strcat(path_buffer, "/");
@@ -124,7 +123,8 @@ int find_c_file(DIR *dp, char *path, char *c_file_path) {
       strcpy(c_file_path, path_buffer);
       return 1;
     }
-    // If directory
+
+    // Directory
     if (dirent->d_type == DT_DIR && strcmp(dirent->d_name, ".") != 0 &&
         strcmp(dirent->d_name, "..") != 0) {
 
@@ -221,7 +221,7 @@ int compare_output(char *file1, char *file2, char *
 comparator) {
   int pid = fork();
   if (pid == 0) {
-    execl(COMPARATOR, COMPARATOR, file1, file2, NULL);
+    execl(comparator, comparator, file1, file2, NULL);
   } else {
     int status = 0;
     waitpid(pid, &status, 0);
@@ -230,6 +230,13 @@ comparator) {
   }
 }
 
+/**
+ * Writes an entry [USERNAME,GRADE,REASON] to the specified file descriptor.
+ * @param fd The file descriptor to write to.
+ * @param username The username.
+ * @param grade The username's grade.
+ * @param reason The grade's reason.
+ */
 void add_results_entry(int fd, char *username, int grade, char *reason) {
   char buffer[PATH_MAX];
   char grade_str[5];
@@ -306,9 +313,10 @@ int main(int argc, char **argv) {
     }
   }
 
+  // Frees up resources and removes unused files.
   close(results);
   remove(COMPILED_FILE_NAME);
   remove(OUTPUT_FILE_NAME);
-  printf("Finished");
+
   return 0;
 }
