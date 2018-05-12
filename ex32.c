@@ -134,6 +134,7 @@ int find_c_file(DIR *dp, char *path, char *c_file_path) {
 
       sub_dir = opendir(path_buffer);
       find_c_file(sub_dir, path_buffer, c_file_path);
+      closedir(sub_dir);
     }
   }
   // An empty string if no C file was found.
@@ -314,6 +315,7 @@ int main(int argc, char **argv) {
   }
 
   // Frees up resources and removes unused files.
+  closedir(p_dir);
   close(results);
   remove(COMPILED_FILE_NAME);
   remove(OUTPUT_FILE_NAME);
